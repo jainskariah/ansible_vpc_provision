@@ -1,0 +1,114 @@
+---
+- name: "VPC craetion and setup"
+  hosts: local
+  connection: local
+  gather_facts: false
+  vars:
+    keyname: flat11fquarkey
+    sgroup: ansible-lab
+    region: us-east-2
+    image: ami-0f7919c33c90f5b58
+    security_group: ansible-lab
+    instance_type: t2.micro
+    aws_access_key:  
+    aws_secret_key: 
+    count: 1
+    debug_enable: true
+  vars_prompt:
+    - name: vpc_cidr
+      prompt: "What is the vpccidr?"
+      private: no
+    - name: vpc_name
+      prompt: "What is the vpcname?"
+      private: no
+    - name: subnet_name
+      prompt: "What is the Subnetname?"
+      private: no
+    - name: subnet_cidr
+      prompt: "What is the Subnetid?"
+      private: no
+    - name: igw_name
+      prompt: "What is the internetgateway name?"
+      private: no
+    - name: ec2tag
+      prompt: "What is the name tag for ec2tage?"
+      private: no
+    - name: route_name
+      prompt: "What is the routername?"
+      private: no
+  tasks:
+    - name: create VPC
+      ec2_vpc_net:
+        name: "{{ vpc_name }}"
+        cidr_block: "{{ vpc_cidr }}"
+        region: "{{ region }}"
+        state: present
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+      register: vpc
+    - debug:
+        var: vpc.vpc.id
+    - name: associate subnet to the VPC
+      ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ vpc.vpc.id }}"
+        region: "{{ region }}"
+        cidr: "{{ subnet_cidr }}"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        tags:
+          Name: "{{ subnet_name }}"
+      register: subnet
+                                    
+    - name: create IGW
+      ec2_vpc_igw:
+        vpc_id: "{{ vpc.vpc.id }}"
+        region: "{{ region }}"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        state: "present"
+      register: igw
+    - name: Tagging the gateway we just created
+      ec2_tag:
+        resource: "{{ igw.gateway_id }}"
+        state: "present"
+        region: "{{ region }}"
+        tags:
+          Name: "{{ igw_name }}"
+    - name: Route IGW
+      ec2_vpc_route_table:
+        vpc_id: "{{ vpc.vpc.id }}"
+        region: "{{ region }}"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        subnets:
+          - "{{ subnet.subnet.id }}"
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ igw.gateway_id  }}"
+        tags:
+          Name: "{{ route_name }}"
+      register: public_rt
+    - name: "Create a new key pair"
+      ec2_key:
+        name: "{{ keyname }}"
+        region: "{{ region }}"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+      register: ec2_keyout
+    - debug:
+        var: ec2_keyout
+    - name: "Saving Key for access"
+      copy: content="{{ ec2_keyout.key.private_key }}" dest="/home/hashroot/JAINAWS/{{ keyname }}.pem" mode=0400
+      when: ec2_keyout.changed
+    - name: "labCreation - Creating Security Group"
+      ec2_group:
+        name: "{{ sgroup }}"
+        description: "Security Group For Ansible Lab"
+        region: "{{ region }}"
+        rules:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
